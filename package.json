@@ -1,0 +1,13 @@
+{
+  "name": "instaduel",
+  "version": "0.1.0",
+  "description": "InstaDuel — Instagram blogerlar duel (battle) sayti, MVP",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "ADMIN_PASSWORD=dev123 node server.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "private": true
+}
