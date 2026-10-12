@@ -21,7 +21,19 @@ const DAY = 24 * 3600 * 1000;
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 /* ----------------------------- Ma'lumotlar bazasi ----------------------------- */
-let db = { seq: 0, bloggers: [], battles: [], tournaments: [] };
+let db = { seq: 0, bloggers: [], battles: [], tournaments: [], users: [] };
+
+function normalizePhone(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  const digits = value.replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('998')) return '+' + digits;
+  if (digits.startsWith('00')) return '+' + digits.slice(2);
+  if (digits.startsWith('9') && digits.length === 9) return '+998' + digits;
+  if (digits.length >= 9) return '+' + digits;
+  return value;
+}
 
 function loadDB() {
   try {
@@ -46,6 +58,7 @@ function saveNow() {
 function nextId() { db.seq += 1; return db.seq; }
 loadDB();
 if (!db.tournaments) db.tournaments = [];
+if (!db.users) db.users = [];
 
 /* ----------------------------- Yordamchi funksiyalar ----------------------------- */
 class HttpError extends Error {
@@ -341,6 +354,47 @@ function seedDemo() {
   saveSoon();
 }
 
+function upsertTelegramUser(payload) {
+  const telegramUserId = payload && payload.telegramUserId ? Number(payload.telegramUserId) : null;
+  const phone = normalizePhone((payload && (payload.phone || payload.phoneNumber || payload.telegramPhone)) || '');
+  const username = str((payload && (payload.username || payload.userName)) || '', 50);
+  const firstName = str((payload && (payload.firstName || payload.first_name)) || '', 60);
+  const lastName = str((payload && (payload.lastName || payload.last_name)) || '', 60);
+
+  if (!telegramUserId && !phone) throw new HttpError(400, 'Telegram user ID yoki telefon raqami kerak');
+
+  const existing = db.users.find((u) => {
+    if (telegramUserId && u.telegramUserId === telegramUserId) return true;
+    if (phone && u.phone && u.phone === phone) return true;
+    return false;
+  });
+
+  if (existing) {
+    if (telegramUserId) existing.telegramUserId = telegramUserId;
+    if (phone) existing.phone = phone;
+    if (username) existing.username = username;
+    if (firstName) existing.firstName = firstName;
+    if (lastName) existing.lastName = lastName;
+    existing.updatedAt = new Date().toISOString();
+    saveSoon();
+    return { registered: false, user: existing };
+  }
+
+  const user = {
+    id: nextId(),
+    telegramUserId,
+    phone,
+    username,
+    firstName,
+    lastName,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  db.users.push(user);
+  saveSoon();
+  return { registered: true, user };
+}
+
 /* ----------------------------- API ----------------------------- */
 const IMG_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 function sniffImage(buf) {
@@ -363,6 +417,25 @@ async function handleApi(req, res, url) {
 
   const vid = getVoterId(req, res);
   let m;
+
+  // ---- Telegram auth registration ----
+  if (method === 'POST' && p === '/api/auth/telegram') {
+    const body = await readJson(req);
+    const payload = body && body.user ? body.user : body;
+    const result = upsertTelegramUser(payload || {});
+    return sendJson(res, 200, {
+      ok: true,
+      registered: !!result.registered,
+      user: {
+        id: result.user.id,
+        telegramUserId: result.user.telegramUserId || null,
+        phone: result.user.phone || '',
+        username: result.user.username || '',
+        firstName: result.user.firstName || '',
+        lastName: result.user.lastName || ''
+      }
+    });
+  }
 
   // ---- Ommaviy ----
   if (method === 'GET' && p === '/api/state') {
