@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0d0e12">
+  <title>InstaDuel — admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;800&family=Manrope:wght@400;600;800&display=swap">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="admin">
+  <header class="app-bar">
+    <a class="brand" href="/app"><span class="wm"><span class="wm-a">Insta</span><span class="wm-b">Duel</span></span> <span class="sub">admin</span></a>
+    <a class="pill" href="/app">Saytga qaytish</a>
+  </header>
+
+  <div id="note" class="toast hidden" role="status" hidden></div>
+
+  <section class="panel" id="login">
+    <h2>Kirish</h2>
+    <p class="sub" id="login-msg"></p>
+    <div class="fields" id="login-fields"><div><label for="pw">Admin paroli</label><input id="pw" type="password" autocomplete="current-password"></div></div>
+    <div class="actions"><button class="abtn" id="loginBtn" type="button">Kirish</button></div>
+  </section>
+
+  <div id="app" hidden style="display:flex;flex-direction:column;gap:16px">
+    <section class="panel" id="stats-panel">
+      <h2>Statistika</h2>
+      <div class="stats-grid" id="stats-cards"></div>
+      <div class="tbl-wrap"><table class="tbl" id="stats-table"></table></div>
+      <div class="sub">Kunlar Toshkent vaqti bo‘yicha. Kirish: bir brauzer sessiyasida bir marta sanaladi. Noyob: kuniga bitta qurilish yoki Telegram akkaunti.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Yangi jang (1 va 1)</h2>
+      <div class="fields">
+        <div><label for="duelA">A tomon (qizil)</label><select id="duelA"></select></div>
+        <div><label for="duelB">B tomon (ko‘k)</label><select id="duelB"></select></div>
+        <div><label for="hours">Davomiyligi (soat)</label><input id="hours" type="number" min="1" max="168" value="24"></div>
+      </div>
+      <div class="actions"><button class="abtn" id="createDuel" type="button">Jangni boshlash</button></div>
+    </section>
+
+    <section class="panel">
+      <h2>Chempionat</h2>
+      <div class="fields">
+        <div><label for="tTitle">Nomi</label><input id="tTitle" maxlength="60" placeholder="Masalan: Kuz chempionati"></div>
+        <div><label for="tHours">Har bir raund (soat)</label><input id="tHours" type="number" min="1" max="168" value="24"></div>
+      </div>
+      <div>
+        <label>Ishtirokchilar (4, 8 yoki 16 ta tanlang)</label>
+        <div class="picks" id="tPicks"></div>
+        <div class="sub" id="tCount" style="margin-top:6px">Tanlandi: 0</div>
+      </div>
+      <div class="actions"><button class="abtn" id="createT" type="button">Chempionatni boshlash</button></div>
+      <div class="list" id="tList"></div>
+      <div class="sub">Juftliklar tasodifiy tuziladi. Raund tugagach g‘oliblar keyingi raundga o‘zi o‘tadi. Durang bo‘lsa qur’a tashlanadi.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Janglar</h2>
+      <div class="list" id="battles"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Bloger qo‘shish</h2>
+      <div class="fields">
+        <div><label for="bName">Ism</label><input id="bName" maxlength="60"></div>
+        <div><label for="bUser">Instagram username</label><input id="bUser" placeholder="username" maxlength="40"></div>
+        <div><label for="bCat">Toifa</label><select id="bCat"></select></div>
+        <div><label for="bFol">Obunachilar soni</label><input id="bFol" type="number" min="0"></div>
+        <div><label for="bFile">Rasm yuklash (JPG, PNG, WebP, 2 MB gacha)</label><input id="bFile" type="file" accept="image/jpeg,image/png,image/webp"></div>
+        <div><label for="bAva">yoki rasm havolasi (https://)</label><input id="bAva" maxlength="300"></div>
+      </div>
+      <div class="actions"><button class="abtn" id="addBlogger" type="button">Qo‘shish</button></div>
+    </section>
+
+    <section class="panel">
+      <h2>Blogerlar</h2>
+      <div class="list" id="bloggers"></div>
+      <div class="actions"><button class="abtn alt" id="seed" type="button">Demo ma‘lumot qo‘shish (bo‘sh bazaga)</button></div>
+    </section>
+  </div>
+</div>
+<script src="/admin.js"></script>
+</body>
+</html>

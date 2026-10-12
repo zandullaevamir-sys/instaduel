@@ -7,6 +7,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const https = require('https');
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -15,25 +16,22 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
+// Telegram sozlamalari (ixtiyoriy). Hammasi Render -> Environment orqali beriladi.
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const WEBAPP_URL = (process.env.WEBAPP_URL || '').replace(/\/+$/, '');
+const BOT_USERNAME = (process.env.BOT_USERNAME || '').replace(/^@/, '');
+const APP_NAME = process.env.APP_NAME || '';
+const REQUIRE_TELEGRAM = process.env.REQUIRE_TELEGRAM === '1';
+// Admin bo'lishi mumkin bo'lgan Telegram ID raqamlari (vergul bilan). Bot'ga /id yozsangiz, o'z ID ingizni ko'rasiz.
+const ADMIN_TG_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map((s) => s.trim()).filter((s) => /^\d{1,15}$/.test(s));
+
 const CATEGORIES = ["Qiziqchi", "Qo'shiqchi", "Brendfeys", "Boshqa"];
 const DAY = 24 * 3600 * 1000;
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 /* ----------------------------- Ma'lumotlar bazasi ----------------------------- */
-let db = { seq: 0, bloggers: [], battles: [], tournaments: [], users: [] };
-
-function normalizePhone(raw) {
-  const value = String(raw || '').trim();
-  if (!value) return '';
-  const digits = value.replace(/\D/g, '');
-  if (!digits) return '';
-  if (digits.startsWith('998')) return '+' + digits;
-  if (digits.startsWith('00')) return '+' + digits.slice(2);
-  if (digits.startsWith('9') && digits.length === 9) return '+998' + digits;
-  if (digits.length >= 9) return '+' + digits;
-  return value;
-}
+let db = { seq: 0, bloggers: [], battles: [], tournaments: [], stats: {} };
 
 function loadDB() {
   try {
@@ -58,7 +56,7 @@ function saveNow() {
 function nextId() { db.seq += 1; return db.seq; }
 loadDB();
 if (!db.tournaments) db.tournaments = [];
-if (!db.users) db.users = [];
+if (!db.stats) db.stats = {};
 
 /* ----------------------------- Yordamchi funksiyalar ----------------------------- */
 class HttpError extends Error {
@@ -135,13 +133,58 @@ function getVoterId(req, res) {
   return vid;
 }
 
+// Telegram Mini App initData imzosini tekshirish (https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app)
+function verifyInitData(raw) {
+  if (!BOT_TOKEN || !raw || typeof raw !== 'string' || raw.length > 4096) return null;
+  const params = new URLSearchParams(raw);
+  const hash = params.get('hash');
+  if (!hash || !/^[a-f0-9]{64}$/.test(hash)) return null;
+  params.delete('hash');
+  const check = [...params.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join('\n');
+  const secret = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
+  const calc = crypto.createHmac('sha256', secret).update(check).digest();
+  if (!crypto.timingSafeEqual(calc, Buffer.from(hash, 'hex'))) return null;
+  const authDate = Number(params.get('auth_date'));
+  if (!authDate || Date.now() / 1000 - authDate > 24 * 3600) return null;
+  try {
+    const user = JSON.parse(params.get('user'));
+    return user && Number.isInteger(user.id) ? user : null;
+  } catch (_) { return null; }
+}
+
+// Ovoz beruvchi: Telegram akkaunti (imzo tasdiqlangan bo'lsa) yoki brauzer cookie'si
+function getVoter(req, res) {
+  const tg = verifyInitData(req.headers['x-telegram-init-data']);
+  if (tg) return { id: 'tg:' + tg.id, tg };
+  return { id: getVoterId(req, res), tg: null };
+}
+
+// Parolni ketma-ket tanlab ko'rishdan himoya: bitta IP dan 15 daqiqada 8 ta xato urinish
+const adminFails = new Map();
+
 function requireAdmin(req) {
-  if (!ADMIN_PASSWORD) throw new HttpError(503, 'ADMIN_PASSWORD o‘rnatilmagan (Render → Environment).');
+  // 1) Telegram akkaunt (asosiy yo'l): imzolangan initData va ruxsat etilgan ID
+  const tg = verifyInitData(req.headers['x-telegram-init-data']);
+  if (tg) {
+    if (ADMIN_TG_IDS.includes(String(tg.id))) return;
+    if (!ADMIN_PASSWORD) throw new HttpError(403, `Bu Telegram akkaunt admin emas. Sizning ID: ${tg.id}`);
+  }
+  // 2) Parol (ixtiyoriy zaxira): faqat ADMIN_PASSWORD berilgan bo'lsa
+  if (!ADMIN_PASSWORD) {
+    throw new HttpError(ADMIN_TG_IDS.length ? 401 : 503, ADMIN_TG_IDS.length
+      ? 'Admin panelni Telegram ichida oching (botga /admin yuboring).'
+      : 'Admin kirishi sozlanmagan: Render → Environment ga ADMIN_TELEGRAM_IDS qo‘shing.');
+  }
+  const ip = clientIp(req);
+  const now = Date.now();
+  let f = adminFails.get(ip);
+  if (!f || f.reset < now) { f = { n: 0, reset: now + 15 * 60 * 1000 }; adminFails.set(ip, f); }
+  if (f.n >= 8) throw new HttpError(429, 'Juda ko‘p xato urinish. 15 daqiqadan keyin urinib ko‘ring.');
   const h = String(req.headers.authorization || '');
   const given = h.startsWith('Bearer ') ? h.slice(7) : '';
   const a = crypto.createHash('sha256').update(given).digest();
   const b = crypto.createHash('sha256').update(ADMIN_PASSWORD).digest();
-  if (!crypto.timingSafeEqual(a, b)) throw new HttpError(401, 'Parol noto‘g‘ri');
+  if (!crypto.timingSafeEqual(a, b)) { f.n += 1; throw new HttpError(401, 'Parol noto‘g‘ri'); }
 }
 
 /* ----------------------------- Biznes mantiq ----------------------------- */
@@ -172,7 +215,10 @@ setInterval(tick, 15 * 1000).unref();
 function battleView(b, vid) {
   const A = db.bloggers.find((x) => x.id === b.aId);
   const B = db.bloggers.find((x) => x.id === b.bId);
-  const total = b.votesA + b.votesB;
+  const both = b.both || 0;
+  const decA = b.votesA - both;
+  const decB = b.votesB - both;
+  const dec = decA + decB;
   return {
     id: b.id,
     status: b.status,
@@ -181,8 +227,9 @@ function battleView(b, vid) {
     finishedAt: b.finishedAt || null,
     votesA: b.votesA,
     votesB: b.votesB,
-    total,
-    pctA: total ? Math.round((b.votesA / total) * 100) : 50,
+    both,
+    total: dec + both,
+    pctA: dec ? Math.round((decA / dec) * 100) : 50,
     winnerId: b.winnerId === undefined ? null : b.winnerId,
     myVote: b.votes && vid ? (b.votes[vid] || null) : null,
     a: A ? pubBlogger(A) : null,
@@ -354,45 +401,139 @@ function seedDemo() {
   saveSoon();
 }
 
-function upsertTelegramUser(payload) {
-  const telegramUserId = payload && payload.telegramUserId ? Number(payload.telegramUserId) : null;
-  const phone = normalizePhone((payload && (payload.phone || payload.phoneNumber || payload.telegramPhone)) || '');
-  const username = str((payload && (payload.username || payload.userName)) || '', 50);
-  const firstName = str((payload && (payload.firstName || payload.first_name)) || '', 60);
-  const lastName = str((payload && (payload.lastName || payload.last_name)) || '', 60);
+/* ----------------------------- Statistika ----------------------------- */
+// Kunlar Toshkent vaqti (UTC+5) bo'yicha hisoblanadi
+function dayKey(ts) {
+  return new Date((ts === undefined ? Date.now() : ts) + 5 * 3600 * 1000).toISOString().slice(0, 10);
+}
+const shortId = (id) => crypto.createHash('sha1').update(String(id)).digest('hex').slice(0, 10);
 
-  if (!telegramUserId && !phone) throw new HttpError(400, 'Telegram user ID yoki telefon raqami kerak');
-
-  const existing = db.users.find((u) => {
-    if (telegramUserId && u.telegramUserId === telegramUserId) return true;
-    if (phone && u.phone && u.phone === phone) return true;
-    return false;
-  });
-
-  if (existing) {
-    if (telegramUserId) existing.telegramUserId = telegramUserId;
-    if (phone) existing.phone = phone;
-    if (username) existing.username = username;
-    if (firstName) existing.firstName = firstName;
-    if (lastName) existing.lastName = lastName;
-    existing.updatedAt = new Date().toISOString();
-    saveSoon();
-    return { registered: false, user: existing };
+function dayStats() {
+  const k = dayKey();
+  if (!db.stats[k]) {
+    db.stats[k] = { visits: 0, uniq: {}, tgUniq: {}, votes: 0, bothVotes: 0, voters: {}, pages: {} };
+    const keep = Object.keys(db.stats).sort().slice(-90); // oxirgi 90 kun
+    Object.keys(db.stats).forEach((d) => { if (!keep.includes(d)) delete db.stats[d]; });
   }
-
-  const user = {
-    id: nextId(),
-    telegramUserId,
-    phone,
-    username,
-    firstName,
-    lastName,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-  db.users.push(user);
+  return db.stats[k];
+}
+function recordHit(voterId, isTg, page) {
+  const s = dayStats();
+  const h = shortId(voterId);
+  s.visits += 1;
+  s.uniq[h] = 1;
+  if (isTg) s.tgUniq[h] = 1;
+  s.pages[page] = (s.pages[page] || 0) + 1;
   saveSoon();
-  return { registered: true, user };
+}
+function recordVote(voterId, side) {
+  const s = dayStats();
+  s.votes += 1;
+  if (side === 'both') s.bothVotes += 1;
+  s.voters[shortId(voterId)] = 1;
+  saveSoon();
+}
+function statsReport() {
+  const days = [];
+  const weekUniq = {};
+  const weekVoters = {};
+  for (let i = 13; i >= 0; i--) {
+    const date = dayKey(Date.now() - i * DAY);
+    const s = db.stats[date] || {};
+    days.push({
+      date,
+      visits: s.visits || 0,
+      unique: Object.keys(s.uniq || {}).length,
+      tgUnique: Object.keys(s.tgUniq || {}).length,
+      votes: s.votes || 0,
+      voters: Object.keys(s.voters || {}).length,
+      both: s.bothVotes || 0
+    });
+    if (i < 7) {
+      Object.keys(s.uniq || {}).forEach((h) => { weekUniq[h] = 1; });
+      Object.keys(s.voters || {}).forEach((h) => { weekVoters[h] = 1; });
+    }
+  }
+  const last7 = days.slice(-7);
+  return {
+    days,
+    today: days[days.length - 1],
+    week: {
+      visits: last7.reduce((a, d) => a + d.visits, 0),
+      votes: last7.reduce((a, d) => a + d.votes, 0),
+      unique: Object.keys(weekUniq).length,
+      voters: Object.keys(weekVoters).length
+    },
+    totals: {
+      bloggers: db.bloggers.length,
+      battles: db.battles.length,
+      live: db.battles.filter((b) => b.status === 'live').length,
+      tournaments: db.tournaments.length
+    }
+  };
+}
+
+/* ----------------------------- Telegram bot ----------------------------- */
+// Bot faqat /start ga javob beradi va Mini App ni ochadigan tugma yuboradi.
+function tgApi(method, payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload || {});
+    const req = https.request({
+      hostname: 'api.telegram.org', path: `/bot${BOT_TOKEN}/${method}`, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
+    }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
+    });
+    req.on('error', reject);
+    req.setTimeout(40000, () => req.destroy(new Error('Telegram javobi kechikdi')));
+    req.write(data);
+    req.end();
+  });
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function startBot() {
+  console.log('Telegram bot ishga tushdi (polling).');
+  try {
+    await tgApi('setChatMenuButton', { menu_button: { type: 'web_app', text: 'InstaDuel', web_app: { url: WEBAPP_URL + '/app' } } });
+    await tgApi('setMyCommands', { commands: [{ command: 'start', description: 'InstaDuel ni ochish' }, { command: 'id', description: 'Telegram ID raqamim' }] });
+  } catch (e) { console.error('Bot sozlashda xato:', e.message); }
+  let offset = 0;
+  for (;;) {
+    try {
+      const r = await tgApi('getUpdates', { offset, timeout: 25, allowed_updates: ['message'] });
+      if (!r.ok) { console.error('getUpdates:', r.description); await sleep(8000); continue; }
+      for (const u of r.result) {
+        offset = u.update_id + 1;
+        const m = u.message;
+        if (m && m.chat && m.from && typeof m.text === 'string' && /^\/id(@\w+)?(\s|$)/.test(m.text)) {
+          await tgApi('sendMessage', { chat_id: m.chat.id, text: `Sizning Telegram ID raqamingiz: ${m.from.id}` }).catch((e) => console.error('sendMessage:', e.message));
+        } else if (m && m.chat && m.from && typeof m.text === 'string' && /^\/admin(@\w+)?(\s|$)/.test(m.text)) {
+          if (m.chat.type === 'private' && ADMIN_TG_IDS.includes(String(m.from.id))) {
+            await tgApi('sendMessage', {
+              chat_id: m.chat.id, text: 'InstaDuel admin paneli:',
+              reply_markup: { inline_keyboard: [[{ text: 'Admin panelni ochish', web_app: { url: WEBAPP_URL + '/admin' } }]] }
+            }).catch((e) => console.error('sendMessage:', e.message));
+          } else {
+            await tgApi('sendMessage', { chat_id: m.chat.id, text: 'Bu buyruq faqat adminlar uchun.' }).catch((e) => console.error('sendMessage:', e.message));
+          }
+        } else if (m && m.chat && typeof m.text === 'string' && m.text.startsWith('/start')) {
+          const payload = (m.text.split(/\s+/)[1] || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+          const url = WEBAPP_URL + '/app' + (payload ? '#' + payload : '');
+          await tgApi('sendMessage', {
+            chat_id: m.chat.id,
+            text: 'InstaDuel: blogerlar jangida ovoz bering va g‘olibni o‘zingiz hal qiling.',
+            reply_markup: { inline_keyboard: [[{ text: 'InstaDuel ni ochish', web_app: { url } }]] }
+          }).catch((e) => console.error('sendMessage:', e.message));
+        }
+      }
+    } catch (e) {
+      console.error('Bot xatosi:', e.message);
+      await sleep(8000);
+    }
+  }
 }
 
 /* ----------------------------- API ----------------------------- */
@@ -415,27 +556,9 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/health') return sendJson(res, 200, { ok: true, time: new Date().toISOString() });
 
-  const vid = getVoterId(req, res);
+  const voter = getVoter(req, res);
+  const vid = voter.id;
   let m;
-
-  // ---- Telegram auth registration ----
-  if (method === 'POST' && p === '/api/auth/telegram') {
-    const body = await readJson(req);
-    const payload = body && body.user ? body.user : body;
-    const result = upsertTelegramUser(payload || {});
-    return sendJson(res, 200, {
-      ok: true,
-      registered: !!result.registered,
-      user: {
-        id: result.user.id,
-        telegramUserId: result.user.telegramUserId || null,
-        phone: result.user.phone || '',
-        username: result.user.username || '',
-        firstName: result.user.firstName || '',
-        lastName: result.user.lastName || ''
-      }
-    });
-  }
 
   // ---- Ommaviy ----
   if (method === 'GET' && p === '/api/state') {
@@ -456,21 +579,45 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { period, category, rows: leaderboard(period, category) });
   }
 
+  if (method === 'GET' && (m = p.match(/^\/api\/battles\/(\d+)$/))) {
+    const b = db.battles.find((x) => x.id === Number(m[1]));
+    if (!b) throw new HttpError(404, 'Jang topilmadi');
+    return sendJson(res, 200, { battle: battleView(b, vid) });
+  }
+
   if (method === 'POST' && (m = p.match(/^\/api\/battles\/(\d+)\/vote$/))) {
     const b = db.battles.find((x) => x.id === Number(m[1]));
     if (!b) throw new HttpError(404, 'Duel topilmadi');
     const body = await readJson(req);
-    if (body.side !== 'a' && body.side !== 'b') throw new HttpError(400, 'Tomon noto‘g‘ri');
+    if (body.side !== 'a' && body.side !== 'b' && body.side !== 'both') throw new HttpError(400, 'Tomon noto‘g‘ri');
+    if (REQUIRE_TELEGRAM && BOT_TOKEN && !voter.tg) throw new HttpError(403, 'Ovoz berish uchun InstaDuel ni Telegram ichida oching');
     if (b.status !== 'live') throw new HttpError(409, 'Bu duel tugagan');
     if (b.votes[vid]) throw new HttpError(409, 'Siz bu duelda allaqachon ovoz bergansiz');
     b.votes[vid] = body.side;
-    if (body.side === 'a') b.votesA += 1; else b.votesB += 1;
+    if (body.side === 'a') b.votesA += 1;
+    else if (body.side === 'b') b.votesB += 1;
+    else { b.votesA += 1; b.votesB += 1; b.both = (b.both || 0) + 1; } // ikkalasiga muxlis: ikkala tomonga bittadan ovoz
+    recordVote(vid, body.side);
     saveSoon();
     return sendJson(res, 200, { battle: battleView(b, vid) });
   }
 
   if (method === 'GET' && p === '/api/config') {
-    return sendJson(res, 200, { contact: process.env.CONTACT_URL || '' });
+    return sendJson(res, 200, {
+      contact: process.env.CONTACT_URL || '',
+      botUsername: BOT_USERNAME,
+      appName: APP_NAME,
+      telegram: !!BOT_TOKEN,
+      requireTelegram: REQUIRE_TELEGRAM && !!BOT_TOKEN,
+      adminPassword: !!ADMIN_PASSWORD,
+      adminTelegram: ADMIN_TG_IDS.length > 0
+    });
+  }
+
+  if (method === 'POST' && p === '/api/hit') {
+    const body = await readJson(req);
+    recordHit(vid, !!voter.tg, body.page === 'landing' ? 'landing' : 'app');
+    return sendJson(res, 200, { ok: true });
   }
 
   if (method === 'GET' && p === '/api/tournament') {
@@ -483,6 +630,8 @@ async function handleApi(req, res, url) {
     requireAdmin(req);
 
     if (method === 'GET' && p === '/api/admin/check') return sendJson(res, 200, { ok: true });
+
+    if (method === 'GET' && p === '/api/admin/stats') return sendJson(res, 200, statsReport());
 
     if (method === 'GET' && p === '/api/admin/data') {
       return sendJson(res, 200, {
@@ -633,7 +782,10 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`InstaDuel ishga tushdi: http://localhost:${PORT}`);
-  if (!ADMIN_PASSWORD) console.warn('Diqqat: ADMIN_PASSWORD o‘rnatilmagan — admin panel ishlamaydi.');
+  if (!ADMIN_PASSWORD && !ADMIN_TG_IDS.length) console.warn('Diqqat: ADMIN_TELEGRAM_IDS ham, ADMIN_PASSWORD ham o‘rnatilmagan — admin panel ishlamaydi.');
+  if (REQUIRE_TELEGRAM && !BOT_TOKEN) console.warn('Diqqat: REQUIRE_TELEGRAM=1, lekin BOT_TOKEN yo‘q — shart e’tiborsiz qoldirildi.');
+  if (BOT_TOKEN && WEBAPP_URL) startBot();
+  else if (BOT_TOKEN) console.warn('Diqqat: bot uchun WEBAPP_URL (sayt manzili) kerak. Bot ishga tushmadi, Mini App tekshiruvi ishlaydi.');
 });
 
 function shutdown() {
