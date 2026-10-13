@@ -31,7 +31,7 @@ const DAY = 24 * 3600 * 1000;
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 /* ----------------------------- Ma'lumotlar bazasi ----------------------------- */
-let db = { seq: 0, bloggers: [], battles: [], tournaments: [], stats: {} };
+let db = { seq: 0, bloggers: [], battles: [], tournaments: [], stats: {}, userVotes: {} };
 
 function loadDB() {
   try {
@@ -57,6 +57,7 @@ function nextId() { db.seq += 1; return db.seq; }
 loadDB();
 if (!db.tournaments) db.tournaments = [];
 if (!db.stats) db.stats = {};
+if (!db.userVotes) db.userVotes = {};
 
 /* ----------------------------- Yordamchi funksiyalar ----------------------------- */
 class HttpError extends Error {
@@ -579,6 +580,31 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { period, category, rows: leaderboard(period, category) });
   }
 
+  // Shaxsiy kabinet: foydalanuvchi ma'lumoti va u bergan ovozlar tarixi
+  if (method === 'GET' && p === '/api/me') {
+    const history = (db.userVotes[vid] || []).slice().reverse().slice(0, 30).map((v) => {
+      const b = db.battles.find((x) => x.id === v.id);
+      if (!b) return null;
+      const A = db.bloggers.find((x) => x.id === b.aId);
+      const B = db.bloggers.find((x) => x.id === b.bId);
+      let result = 'live';
+      if (b.status === 'finished') {
+        if (v.side === 'both') result = 'fan';
+        else if (!b.winnerId) result = 'draw';
+        else result = (v.side === 'a' ? b.aId : b.bId) === b.winnerId ? 'won' : 'lost';
+      }
+      return { battleId: b.id, a: A ? A.name : '—', b: B ? B.name : '—', pick: v.side, result, ts: v.ts };
+    }).filter(Boolean);
+    const all = db.userVotes[vid] || [];
+    const photo = voter.tg && typeof voter.tg.photo_url === 'string' && voter.tg.photo_url.startsWith('https://') ? voter.tg.photo_url : '';
+    return sendJson(res, 200, {
+      telegram: !!voter.tg,
+      user: voter.tg ? { name: [voter.tg.first_name, voter.tg.last_name].filter(Boolean).join(' ').slice(0, 80), username: voter.tg.username || '', photo } : null,
+      stats: { votes: all.length, fan: all.filter((v) => v.side === 'both').length, won: history.filter((h) => h.result === 'won').length },
+      votes: history
+    });
+  }
+
   if (method === 'GET' && (m = p.match(/^\/api\/battles\/(\d+)$/))) {
     const b = db.battles.find((x) => x.id === Number(m[1]));
     if (!b) throw new HttpError(404, 'Jang topilmadi');
@@ -598,6 +624,7 @@ async function handleApi(req, res, url) {
     else if (body.side === 'b') b.votesB += 1;
     else { b.votesA += 1; b.votesB += 1; b.both = (b.both || 0) + 1; } // ikkalasiga muxlis: ikkala tomonga bittadan ovoz
     recordVote(vid, body.side);
+    db.userVotes[vid] = (db.userVotes[vid] || []).concat({ id: b.id, side: body.side, ts: Date.now() }).slice(-100);
     saveSoon();
     return sendJson(res, 200, { battle: battleView(b, vid) });
   }
@@ -752,8 +779,7 @@ function serveStatic(req, res, pathname) {
     return serveFile(res, path.join(UPLOAD_DIR, name), 'public, max-age=604800');
   }
 
-  if (rel === '/') rel = '/landing.html';
-  if (rel === '/app') rel = '/app.html';
+  if (rel === '/' || rel === '/app') rel = '/app.html';
   if (rel === '/admin') rel = '/admin.html';
   const file = path.join(PUBLIC_DIR, rel);
   if (!file.startsWith(PUBLIC_DIR + path.sep)) throw new HttpError(403, 'Taqiqlangan');

@@ -6,7 +6,7 @@ const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&':
 // Telegram ichida ochilsa, kirish Telegram akkaunt orqali bo'ladi (parol shart emas)
 const tg = window.Telegram && window.Telegram.WebApp;
 const inTelegram = !!(tg && tg.initData);
-if (inTelegram) { try { tg.ready(); tg.expand(); tg.setHeaderColor('#0d0e12'); tg.setBackgroundColor('#0d0e12'); } catch (_) { /* eski versiya */ } }
+if (inTelegram) { try { tg.ready(); tg.expand(); tg.setHeaderColor('#ffffff'); tg.setBackgroundColor('#ffffff'); } catch (_) { /* eski versiya */ } }
 
 let token = inTelegram ? '' : (sessionStorage.getItem('iduel_admin') || '');
 let lastError = '';
@@ -34,15 +34,6 @@ async function api(path, opts) {
 }
 const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 
-function selectedTournamentIds() {
-  return [...document.querySelectorAll('#tPicks input:checked')].map((x) => Number(x.value));
-}
-function updateCount() { $('#tCount').textContent = 'Tanlandi: ' + selectedTournamentIds().length; }
-
-function statCard(title, rows) {
-  return `<div class="stat-card"><h3>${esc(title)}</h3>${rows.map(([k, v]) => `<div class="stat-row"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`;
-}
-
 async function loadStats() {
   const s = await api('/api/admin/stats');
   $('#stats-cards').innerHTML =
@@ -64,14 +55,6 @@ async function load() {
   if (data.bloggers.length > 1) $('#duelB').selectedIndex = 1;
   $('#bCat').innerHTML = data.categories.map((c) => `<option>${esc(c)}</option>`).join('');
 
-  $('#tPicks').innerHTML = data.bloggers.map((b) => `<div class="pick"><input type="checkbox" id="tp${b.id}" value="${b.id}"><label for="tp${b.id}">${esc(b.name)}</label></div>`).join('') || '<div class="sub">Avval blogerlarni qo‘shing.</div>';
-  updateCount();
-
-  $('#tList').innerHTML = (data.tournaments || []).map((t) => `
-    <div class="item">
-      <div class="who"><b>${esc(t.title)}</b> <span>${t.size} bloger, ${t.status === 'running' ? 'davom etmoqda (' + t.round + '-raund)' : t.status === 'finished' ? 'tugagan' : 'xato'}</span></div>
-      <button class="abtn danger sm" data-del-t="${t.id}" type="button">O‘chirish</button>
-    </div>`).join('');
 
   $('#bloggers').innerHTML = data.bloggers.length ? data.bloggers.map((b) => `
     <div class="item">
@@ -115,20 +98,11 @@ async function login() {
 
 $('#loginBtn').addEventListener('click', login);
 $('#pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
-$('#tPicks').addEventListener('change', updateCount);
 
 $('#createDuel').addEventListener('click', async () => {
   try {
     await api('/api/admin/battles', json('POST', { aId: $('#duelA').value, bId: $('#duelB').value, hours: $('#hours').value }));
     note('Jang boshlandi', true);
-    await load();
-  } catch (e) { note(e.message, false); }
-});
-
-$('#createT').addEventListener('click', async () => {
-  try {
-    await api('/api/admin/tournaments', json('POST', { title: $('#tTitle').value, bloggerIds: selectedTournamentIds(), hours: $('#tHours').value }));
-    note('Chempionat boshlandi', true);
     await load();
   } catch (e) { note(e.message, false); }
 });
@@ -169,9 +143,6 @@ document.addEventListener('click', async (e) => {
     } else if (t.dataset.delBattle) {
       if (!confirm('Jangni o‘chirasizmi? Natijalar reytingdan ham yo‘qoladi.')) return;
       await api('/api/admin/battles/' + t.dataset.delBattle, { method: 'DELETE' });
-    } else if (t.dataset.delT) {
-      if (!confirm('Chempionatni o‘chirasizmi? Janglar qoladi, lekin chempionatdan ajraladi.')) return;
-      await api('/api/admin/tournaments/' + t.dataset.delT, { method: 'DELETE' });
     } else if (t.dataset.finish) {
       await api('/api/admin/battles/' + t.dataset.finish + '/finish', json('POST'));
     } else return;

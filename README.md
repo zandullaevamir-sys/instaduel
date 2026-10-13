@@ -6,29 +6,27 @@ Hech qanday tashqi kutubxona yo'q: faqat Node.js (>=18). `npm install` bir zumda
 
 ## Sahifalar
 
-- `/` — landing (jonli "Bugungi jang" kartasi bilan)
-- `/app` — ilova, pastki menyu bilan: **Jang** (ovoz berish, taymer), **Liga** (haftalik reyting, toifa bo'yicha), **Turnir** (chempionat juftliklari), **Profil** (o'z ovozlaringiz, brauzerda saqlanadi)
-- `/admin` — admin panel
+- `/` (va `/app`) — ilova. Asosiy ekran **Jang**, pastki menyuda ikkita bo'lim: **Jang** va **Kabinet** (shaxsiy kabinet)
+- `/admin` — admin panel (Telegram akkaunt bilan kiriladi)
 
 ## Imkoniyatlar
 
 - Jonli jang: ikki tomon, foiz chizig'i, qolgan vaqt taymeri. Bir nechta jang bo'lsa, o'qlar bilan almashtiriladi
 - Bitta brauzerga (Telegramda bitta akkauntga) bitta jangda bitta ovoz. "Ikkalasiga ham muxlisman" tugmasi ikkala blogerga bittadan ovoz beradi. G'olib farqi o'zgarmaydi, foiz chizig'i esa faqat aniq tanlovlardan hisoblanadi
-- Haftalik liga: hafta dushanba 00:00 (Toshkent vaqti) dan yakshanba kechasigacha. G'alaba 3 ball, durang 1 ball. Toifalar: Qiziqchi, Qo'shiqchi, Brendfeys, Boshqa
-- Chempionat: 4, 8 yoki 16 bloger, olib tashlash tizimi. Juftliklar tasodifiy, raund tugagach g'oliblar o'zi keyingi raundga o'tadi, durang bo'lsa qur'a tashlanadi
-- Admin panel: bloger qo'shish (rasm yuklash bilan), jang boshlash, chempionat boshlash, muddatidan oldin yakunlash, o'chirish, demo ma'lumot
-- Jangning vaqti tugagach avtomatik yakunlanadi
-- Natija kartochkalari: jang tugagach g'olib, mag'lub (yoki durang bo'lsa ikkala bloger) uchun 1080x1920 (Instagram hikoyasi o'lchami) rasm yaratiladi. Kartochkada InstaDuel logotipi va sayt havolasi bor. Yuklab olish, telefonda ulashish, Telegramda ulashish va havolani nusxalash mumkin. Admin panelda tugagan jang yonida "G'olib havolasi" tugmasi bor
+- Natija kartochkalari: jang tugagach g'olib, mag'lub (yoki durang bo'lsa ikkala bloger) uchun 1080x1920 (Instagram hikoyasi o'lchami) rasm yaratiladi. Kartochkada InstaDuel logotipi va sayt havolasi bor. Yuklab olish, telefonda ulashish, Telegramda ulashish va havolani nusxalash mumkin
+- Shaxsiy kabinet: Telegram ismi va rasmi, nechta ovoz bergani, nechta tanlovi g'olib chiqqani va har bir ovozining natijasi. Telegram orqali kirgan foydalanuvchining tarixi akkauntida saqlanadi
 - Admin statistikasi: bugun va oxirgi 7 kunda nechta kirish, noyob tashrifchi (shundan Telegramdan), ovoz va ovoz berganlar, 14 kunlik jadval
+- Jangning vaqti tugagach avtomatik yakunlanadi
 
-Dizayn: qora fon, qizil (A) va ko'k (B) tomonlar, Unbounded va Manrope shriftlari.
+Dizayn: oq fon, qizil (A) va ko'k (B) tomonlar, Unbounded va Manrope shriftlari.
+
+Landing sahifa, sovg'a o'yini, haftalik liga va chempionat hozircha yo'q: sayt ochilganda to'g'ridan-to'g'ri Jang ekrani chiqadi.
 
 ## Mahalliy ishga tushirish
 
 ```bash
 ADMIN_PASSWORD=parol123 npm start
-# http://localhost:3000  — landing
-# http://localhost:3000/app  — ilova
+# http://localhost:3000  — ilova (Jang ekrani)
 # http://localhost:3000/admin  — admin panel
 ```
 
@@ -55,8 +53,7 @@ git push -u origin main
 1. render.com → New → **Blueprint** (yoki New → Web Service) va GitHub repozitoriyni tanlang.
 2. Blueprint ishlatsangiz `render.yaml` hammasini o'zi to'ldiradi. Qo'lda yaratsangiz: Runtime `Node`, Build `npm install`, Start `npm start`, Health Check Path `/api/health`.
 3. **Environment** bo'limida `ADMIN_PASSWORD` ni kuchli parol bilan kiriting (keyin uni Telegram akkaunt bilan almashtirasiz, pastdagi bo'limga qarang).
-4. Ixtiyoriy: `CONTACT_URL` (masalan `https://t.me/sizning_akkaunt` yoki `mailto:...`) kiritsangiz, landingdagi "Hamkor bo'lish" tugmasi ko'rinadi. Kiritmasangiz, bu bo'lim yashirinadi.
-5. Deploy tugagach `https://<nom>.onrender.com/admin` ga kirib bloger va jang qo'shing.
+4. Deploy tugagach `https://<nom>.onrender.com/admin` ga kirib bloger va jang qo'shing.
 
 ## Telegram Mini App
 
@@ -104,7 +101,6 @@ Haqiqiy ishga tushirish uchun ikki yo'l bor:
 ## Hozirgi cheklovlar va keyingi qadamlar
 
 - Brauzerdan ovoz himoyasi oddiy (cookie): boshqa brauzer, inkognito yoki skript bilan qayta ovoz berish mumkin. `REQUIRE_TELEGRAM=1` bilan ovoz faqat tasdiqlangan Telegram akkauntidan qabul qilinadi.
-- Mavzu konkursi (landingda "Tez orada" deb belgilangan) hali qurilmagan.
 - Instagram profil rasmlari avtomatik olinmaydi. Admin panelda rasmni yuklang.
 - Duellarni qo'lda yaratish kerak. Keyingi qadam: kunlik avtomatik duel (toifa bo'yicha tasodifiy juftlik).
 - Ulashish uchun har bir duelga alohida havola va OG-rasm qo'shish mumkin.

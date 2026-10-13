@@ -3,36 +3,15 @@
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const THEME_KEY = 'instaduel-theme';
-function applyTheme(theme) {
-  const next = theme === 'day' ? 'day' : 'night';
-  document.body.dataset.theme = next;
-  localStorage.setItem(THEME_KEY, next);
-  document.querySelectorAll('[data-theme-toggle]').forEach((btn) => {
-    btn.textContent = next === 'day' ? '🌙' : '☀️';
-    btn.setAttribute('aria-label', next === 'day' ? 'Tun rejimi' : 'Kun rejimi');
-    btn.setAttribute('title', next === 'day' ? 'Tun rejimiga o‘tish' : 'Kun rejimiga o‘tish');
-  });
-}
-function initTheme() {
-  try {
-    const saved = localStorage.getItem(THEME_KEY);
-    const preferred = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
-    applyTheme(saved || preferred);
-  } catch (_) {
-    applyTheme('night');
-  }
-}
-
-const TABS = ['jang', 'liga', 'turnir', 'profil'];
-const PILLS = { jang: 'Kun jangi, 1 va 1', liga: 'Hafta yakuni: yakshanba', turnir: '', profil: 'Anonim' };
+const TABS = ['jang', 'kabinet'];
+const PILLS = { jang: 'Kun jangi, 1 va 1', kabinet: 'Mening ovozlarim' };
 
 // Telegram Mini App ichida ochilgan bo'lsa, Telegram obyekti va imzolangan initData bo'ladi
 const tg = window.Telegram && window.Telegram.WebApp;
 const inTelegram = !!(tg && tg.initData);
 let startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
 if (inTelegram) {
-  try { tg.ready(); tg.expand(); tg.setHeaderColor('#0d0e12'); tg.setBackgroundColor('#0d0e12'); } catch (_) { /* eski Telegram versiyasi */ }
+  try { tg.ready(); tg.expand(); tg.setHeaderColor('#ffffff'); tg.setBackgroundColor('#ffffff'); } catch (_) { /* eski Telegram versiyasi */ }
 }
 
 const state = {
@@ -40,9 +19,6 @@ const state = {
   tab: 'jang',
   live: [], recent: [], categories: [],
   idx: 0,
-  ligaCat: '',
-  round: null,
-  tournament: null,
   msgs: {},
   jangJson: ''
 };
@@ -87,18 +63,6 @@ function igLink(b) {
   return `https://instagram.com/${encodeURIComponent(b.username)}`;
 }
 
-/* ---------- Mahalliy ovozlar tarixi (Profil uchun) ---------- */
-function loadMine() {
-  try { return JSON.parse(localStorage.getItem('iduel_mine') || '[]'); } catch (_) { return []; }
-}
-function saveMine(entry) {
-  try {
-    const list = loadMine().filter((x) => x.id !== entry.id);
-    list.unshift(entry);
-    localStorage.setItem('iduel_mine', JSON.stringify(list.slice(0, 50)));
-  } catch (_) { /* brauzer saqlashga ruxsat bermasa, o'tkazib yuboramiz */ }
-}
-
 /* ---------- Jang ---------- */
 function fighterHTML(b, key, battle) {
   let cls = 'fighter ' + key;
@@ -122,12 +86,12 @@ function duelHTML(b) {
     const text = picked ? `Tanlandi: ${key.toUpperCase()}` : `${key.toUpperCase()} uchun ovoz`;
     return `<button type="button" class="v${key}${picked ? ' picked' : ''}" data-vote="${key}" data-id="${b.id}"${voted || blocked ? ' disabled' : ''}>${text}</button>`;
   };
-  const bothBtn = `<button type="button" class="vboth${b.myVote === 'both' ? ' picked' : ''}" data-vote="both" data-id="${b.id}"${voted || blocked ? ' disabled' : ''}>${b.myVote === 'both' ? 'Ikkalasini ham tanladingiz' : 'Ikkalasini ham qo‘llab-quvvatlash'}</button>`;
+  const bothBtn = `<button type="button" class="vboth${b.myVote === 'both' ? ' picked' : ''}" data-vote="both" data-id="${b.id}"${voted || blocked ? ' disabled' : ''}>${b.myVote === 'both' ? 'Ikkalasiga ham muxlisman: tanlandi' : 'Ikkalasiga ham muxlisman'}</button>`;
   const tgLink = state.config.botUsername ? ` <a href="https://t.me/${esc(state.config.botUsername)}" target="_blank" rel="noopener noreferrer" style="text-decoration:underline">Botni ochish</a>` : '';
   let noteHTML;
   if (blocked) noteHTML = `<div class="note err" role="status">Ovoz berish uchun InstaDuel ni Telegram ichida oching.${tgLink}</div>`;
   else if (msg && msg.err) noteHTML = `<div class="note err" role="status">${esc(msg.text)}</div>`;
-  else if (b.myVote === 'both') noteHTML = `<div class="note ok" role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>Ikkala blogerni ham qo‘llab-quvvatladi[...]
+  else if (b.myVote === 'both') noteHTML = `<div class="note ok" role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>Ikkala blogerni ham qo‘llab-quvvatladingiz. Rahmat!</div>`;
   else if (voted) noteHTML = `<div class="note ok" role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>Ovozingiz qabul qilindi. Rahmat!</div>`;
   else noteHTML = `<div class="note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 4L3 11l6 2 2 6 3-4 5 3z"/></svg>Har bir duelda bitta ovoz beriladi. Tanlovni o‘zgartirib bo‘lmaydi.</div>`;
 
@@ -192,9 +156,10 @@ function renderJang(force) {
 
 function tickTimer() {
   const el = $('#timer');
-  if (!el) return;
-  el.textContent = timeLeft(el.dataset.end);
-  if (Date.parse(el.dataset.end) <= Date.now()) refresh();
+  if (el) {
+    el.textContent = timeLeft(el.dataset.end);
+    if (Date.parse(el.dataset.end) <= Date.now()) refresh();
+  }
 }
 
 document.addEventListener('click', async (e) => {
@@ -215,8 +180,6 @@ document.addEventListener('click', async (e) => {
       const i = state.live.findIndex((x) => x.id === id);
       if (i >= 0) state.live[i] = battle;
       delete state.msgs[id];
-      const pick = btn.dataset.vote === 'both' ? 'Ikkalasi' : (btn.dataset.vote === 'a' ? battle.a : battle.b).name;
-      saveMine({ id, a: battle.a.name, b: battle.b.name, pick, ts: Date.now() });
     } catch (err) {
       state.msgs[id] = { text: err.message, err: true };
       await refresh();
@@ -226,101 +189,12 @@ document.addEventListener('click', async (e) => {
   }
   const card = e.target.closest('[data-card]');
   if (card) { openCard(Number(card.dataset.card)); return; }
-  const go = e.target.closest('[data-go-battle]');
-  if (go) {
-    const i = state.live.findIndex((x) => x.id === Number(go.dataset.goBattle));
-    if (i >= 0) { state.idx = i; location.hash = '#jang'; }
-  }
+
 });
 
-/* ---------- Liga ---------- */
-function renderLigaTabs() {
-  const box = $('#liga-tabs');
-  if (box.dataset.ready || !state.categories.length) return;
-  box.dataset.ready = '1';
-  state.ligaCat = state.categories[0];
-  box.innerHTML = state.categories.map((c) => `<button type="button" data-cat="${esc(c)}" aria-pressed="${c === state.ligaCat}">${esc(c)}</button>`).join('');
-  box.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-cat]');
-    if (!b) return;
-    state.ligaCat = b.dataset.cat;
-    box.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-    loadLiga();
-  });
-}
-
-async function loadLiga() {
-  if (!state.ligaCat) return;
-  const q = new URLSearchParams({ period: 'week', category: state.ligaCat });
-  const { rows } = await api('/api/leaderboard?' + q);
-  const box = $('#liga-list');
-  if (!rows.length) { box.innerHTML = '<div class="empty"><b>Bu toifada blogerlar yo‘q</b>Admin panel orqali blogerlarni qo‘shing.</div>'; return; }
-  box.innerHTML = rows.map((r, i) => `
-    <div class="row">
-      <span class="rank${i < 3 && r.points > 0 ? ' top' : ''}">${i + 1}</span>
-      ${face(r.blogger)}
-      <div class="who"><b>${esc(r.blogger.name)}</b><a href="${igLink(r.blogger)}" target="_blank" rel="noopener noreferrer">@${esc(r.blogger.username)}</a></div>
-      <span class="pts"><b>${r.points}</b> ball</span>
-    </div>`).join('');
-}
-
-/* ---------- Turnir ---------- */
-function matchHTML(m) {
-  const winnerOut = (side) => (m.status === 'finished' && m.winnerId && m[side] && m.winnerId !== m[side].id) ? ' out' : '';
-  const name = (x, fromIdx) => (x ? esc(x.name) : `Jang ${fromIdx} g‘olibi`);
-  let badge = '<span class="tiny">VS</span>';
-  if (m.status === 'live') badge = '<span class="tiny live">Jonli</span>';
-  else if (m.status === 'finished') badge = `<span class="tiny">${m.votesA}:${m.votesB}</span>`;
-  const inner = `
-    <span class="dot a"></span>
-    <span class="side${winnerOut('a')}">${name(m.a, m.from ? m.from[0] : '')}</span>
-    ${badge}
-    <span class="side r${winnerOut('b')}">${name(m.b, m.from ? m.from[1] : '')}</span>
-    <span class="dot b"></span>`;
-  if (m.status === 'live') return `<button type="button" class="match" data-go-battle="${m.id}">${inner}</button>`;
-  return `<div class="match">${inner}</div>`;
-}
-
-function renderTurnir() {
-  const box = $('#turnir-body');
-  const t = state.tournament;
-  if (!t) {
-    box.innerHTML = '<div class="empty"><b>Hozircha chempionat yo‘q</b>Yangi chempionat boshlanganda juftliklar shu yerda ko‘rinadi.</div>';
-    $('#pill').textContent = 'Tez orada';
-    return;
-  }
-  if (state.round === null || state.round >= t.rounds.length) state.round = Math.max(0, t.currentRound);
-  $('#pill').textContent = t.size + ' bloger';
-  const tabs = t.rounds.map((r, i) => `<button type="button" data-round="${i}" aria-pressed="${i === state.round}">${esc(r.label)}</button>`).join('');
-  const champ = t.champion ? `<div class="champion">${face(t.champion)}<div><b>${esc(t.champion.name)}</b><span>${esc(t.title)} chempioni</span></div></div>` : '';
-  box.innerHTML = `${champ}<div class="tabs" id="round-tabs" style="margin:${champ ? '16px' : '0'} 0 16px">${tabs}</div><div class="list">${t.rounds[state.round].matches.map(matchHTML).join('')}</div>`;
-  $('#round-tabs').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-round]');
-    if (!b) return;
-    state.round = Number(b.dataset.round);
-    renderTurnir();
-  });
-}
-
-async function loadTurnir() {
-  const { tournament } = await api('/api/tournament');
-  state.tournament = tournament;
-  renderTurnir();
-}
-
-/* ---------- Profil ---------- */
-function renderProfil() {
-  const mine = loadMine();
-  $('#my-count').textContent = mine.length;
-  $('#my-votes').innerHTML = mine.length
-    ? mine.slice(0, 20).map((m) => `<div class="mine"><b>${esc(m.a)} va ${esc(m.b)}</b><span>Tanlovingiz: ${esc(m.pick)}</span></div>`).join('')
-    : '<div class="empty"><b>Hali ovoz bermagansiz</b>Jang bo‘limiga o‘tib birinchi ovozingizni bering.</div>';
-}
-
-
 /* ---------- G'oliblar ro'yxati va kartochkalar ---------- */
-const RED = '#f03e4c';
-const BLUE = '#3b82ff';
+const RED = '#e02d3c';
+const BLUE = '#2563eb';
 const KIND = {
   win: { pill: 'G‘OLIB', file: 'golib', tag: 'Muxlislarga rahmat!' },
   lose: { pill: 'MAG‘LUBIYAT', file: 'maglub', tag: 'Kuchli kurashdi. Revansh kutilmoqda!' },
@@ -407,16 +281,18 @@ async function drawCard(b, side) {
   const cv = $('#card');
   const ctx = cv.getContext('2d');
   const accent = side === 'a' ? RED : BLUE;
+  const tint = side === 'a' ? '#fdecee' : '#e8effd';
   try { await Promise.all([document.fonts.load('800 80px Unbounded'), document.fonts.load('800 40px Manrope')]); } catch (_) { /* zaxira shrift ishlaydi */ }
   const D = "Unbounded, 'Segoe UI', sans-serif";
   const M = "Manrope, 'Segoe UI', sans-serif";
   const img = await loadImg(s.p.avatar);
+  const INK = '#12141a';
 
   ctx.clearRect(0, 0, 1080, 1920);
-  ctx.fillStyle = '#0d0e12';
+  ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, 1080, 1920);
-  ctx.globalAlpha = s.kind === 'win' ? 0.16 : 0.09;
-  ctx.fillStyle = accent;
+  ctx.globalAlpha = s.kind === 'win' ? 1 : 0.55;
+  ctx.fillStyle = tint;
   ctx.beginPath(); ctx.arc(540, 700, 640, 0, Math.PI * 2); ctx.fill();
   ctx.globalAlpha = 1;
 
@@ -436,12 +312,12 @@ async function drawCard(b, side) {
   roundRect(ctx, 540 - pw / 2, 230, pw, 96, 48);
   if (s.kind === 'win') {
     ctx.fillStyle = accent; ctx.fill();
-    ctx.fillStyle = '#0d0e12';
+    ctx.fillStyle = '#ffffff';
   } else {
     ctx.lineWidth = 6;
-    ctx.strokeStyle = s.kind === 'lose' ? accent : '#f3efe6';
+    ctx.strokeStyle = s.kind === 'lose' ? accent : INK;
     ctx.stroke();
-    ctx.fillStyle = s.kind === 'lose' ? accent : '#f3efe6';
+    ctx.fillStyle = s.kind === 'lose' ? accent : INK;
   }
   ctx.fillText(k.pill, 540, 297);
 
@@ -455,17 +331,17 @@ async function drawCard(b, side) {
     const kk = Math.max((2 * r) / img.width, (2 * r) / img.height);
     ctx.drawImage(img, cx - (img.width * kk) / 2, cy - (img.height * kk) / 2, img.width * kk, img.height * kk);
   } else {
-    ctx.fillStyle = '#0d0e12';
+    ctx.fillStyle = '#ffffff';
     ctx.beginPath(); ctx.arc(cx, cy - 50, 85, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.ellipse(cx, cy + 215, 190, 150, 0, 0, Math.PI * 2); ctx.fill();
   }
-  if (s.kind === 'lose') { ctx.fillStyle = 'rgba(13,14,18,0.28)'; ctx.fillRect(cx - r, cy - r, 2 * r, 2 * r); }
+  if (s.kind === 'lose') { ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(cx - r, cy - r, 2 * r, 2 * r); }
   ctx.restore();
   ctx.lineWidth = 14;
-  ctx.strokeStyle = s.kind === 'lose' ? '#9aa0ae' : '#f3efe6';
+  ctx.strokeStyle = s.kind === 'lose' ? '#a0a6b2' : INK;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
 
-  ctx.fillStyle = '#f3efe6';
+  ctx.fillStyle = INK;
   fitText(ctx, s.p.name, 900, 84, 800, D);
   ctx.fillText(s.p.name, 540, 1100);
 
@@ -473,15 +349,15 @@ async function drawCard(b, side) {
   fitText(ctx, '@' + s.p.username, 900, 46, 800, M);
   ctx.fillText('@' + s.p.username, 540, 1175);
 
-  ctx.fillStyle = '#9aa0ae';
+  ctx.fillStyle = '#6b7280';
   ctx.font = `600 38px ${M}`;
   ctx.fillText(s.p.category, 540, 1240);
 
-  ctx.fillStyle = s.kind === 'lose' ? '#b4b9c5' : '#f3efe6';
+  ctx.fillStyle = s.kind === 'lose' ? '#969daa' : INK;
   ctx.font = `800 200px ${D}`;
   ctx.fillText(s.pct + '%', 540, 1480);
 
-  ctx.fillStyle = '#9aa0ae';
+  ctx.fillStyle = '#6b7280';
   const line = s.kind === 'win' ? `${s.votes} ovoz, ${s.other.name} ustidan`
     : s.kind === 'lose' ? `${s.votes} ovoz, g‘olib: ${s.other.name}`
     : `${s.votes} ovoz, ${s.other.name} bilan teng`;
@@ -489,21 +365,21 @@ async function drawCard(b, side) {
   ctx.fillText(line, 540, 1560);
 
   roundRect(ctx, 140, 1620, 800, 28, 14);
-  ctx.fillStyle = '#1f222b'; ctx.fill();
+  ctx.fillStyle = '#e8eaf0'; ctx.fill();
   roundRect(ctx, 140, 1620, Math.max(28, (800 * s.pct) / 100), 28, 14);
   ctx.fillStyle = accent; ctx.fill();
 
-  ctx.fillStyle = '#b4b9c5';
+  ctx.fillStyle = '#4b5563';
   fitText(ctx, k.tag, 900, 38, 600, M);
   ctx.fillText(k.tag, 540, 1712);
 
   // InstaDuel havolasi
-  ctx.fillStyle = '#f3efe6';
-  const link = `${location.host}/app`;
+  ctx.fillStyle = INK;
+  const link = location.host;
   fitText(ctx, link, 900, 58, 800, M);
   ctx.fillText(link, 540, 1798);
 
-  ctx.fillStyle = '#9aa0ae';
+  ctx.fillStyle = '#6b7280';
   ctx.font = `600 32px ${M}`;
   const bot = state.config && state.config.botUsername ? `   t.me/${state.config.botUsername}` : '';
   ctx.fillText(`${fmtDate(b.finishedAt || b.endsAt)}${bot}`, 540, 1866);
@@ -517,7 +393,7 @@ function shareLink(id) {
   const c = state.config || {};
   if (c.botUsername && c.appName) return `https://t.me/${c.botUsername}/${c.appName}?startapp=natija-${id}`;
   if (c.botUsername) return `https://t.me/${c.botUsername}?startapp=natija-${id}`;
-  return `${location.origin}/app#natija-${id}`;
+  return `${location.origin}/#natija-${id}`;
 }
 
 function canvasBlob() {
@@ -609,7 +485,7 @@ $('#card-tg').addEventListener('click', () => {
 
 $('#card-browser').addEventListener('click', () => {
   if (!cardBattle) return;
-  const url = `${location.origin}/app#natija-${cardBattle.id}`;
+  const url = `${location.origin}/#natija-${cardBattle.id}`;
   if (inTelegram && tg.openLink) tg.openLink(url); else window.open(url, '_blank', 'noopener');
 });
 
@@ -622,6 +498,51 @@ $('#card-link').addEventListener('click', async () => {
   setTimeout(() => { btn.textContent = 'Havolani nusxalash'; }, 2000);
 });
 
+/* ---------- Shaxsiy kabinet ---------- */
+const RESULT = {
+  won: ['Tanlovingiz g‘olib bo‘ldi', 'good'],
+  lost: ['Tanlovingiz mag‘lub bo‘ldi', 'bad'],
+  draw: ['Durang', 'mute'],
+  fan: ['Ikkalasiga muxlis', 'mute'],
+  live: ['Jang davom etmoqda', 'live']
+};
+
+function kabinetHTML(d) {
+  const u = d.user;
+  const name = u ? (u.name || 'Telegram foydalanuvchi') : 'Mehmon';
+  const sub = u ? (u.username ? '@' + u.username : 'Telegram akkaunt') : 'Brauzer orqali kirgansiz';
+  const photo = u && u.photo ? `<img src="${esc(u.photo)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
+  const head = `
+    <div class="me">
+      <span class="me-ava"><svg viewBox="0 0 56 56" aria-hidden="true">${SILHOUETTE_LINE}</svg>${photo}</span>
+      <div class="who"><b>${esc(name)}</b><span class="sub">${esc(sub)}</span></div>
+    </div>`;
+  const stats = `
+    <div class="stat-boxes">
+      <div class="stat-box"><b>${d.stats.votes}</b><span>ovoz bergansiz</span></div>
+      <div class="stat-box"><b>${d.stats.won}</b><span>to‘g‘ri tanlov</span></div>
+      <div class="stat-box"><b>${d.stats.fan}</b><span>muxlislik</span></div>
+    </div>`;
+  const hint = d.telegram ? '' : '<div class="note">Telegram orqali kirsangiz, ovozlaringiz akkauntingizda saqlanadi.</div>';
+  const list = d.votes.length
+    ? `<h2 class="sec-title">Mening ovozlarim</h2><div class="list">${d.votes.map((v) => {
+        const pick = v.pick === 'both' ? 'Ikkalasi' : (v.pick === 'a' ? v.a : v.b);
+        const r = RESULT[v.result] || RESULT.live;
+        return `<div class="mine"><div class="who"><b>${esc(v.a)} va ${esc(v.b)}</b><span class="sub">Tanlovingiz: ${esc(pick)}</span></div><span class="badge ${r[1]}">${r[0]}</span></div>`;
+      }).join('')}</div>`
+    : '<div class="empty"><b>Hali ovoz bermagansiz</b>Jang bo‘limiga o‘tib birinchi ovozingizni bering.</div>';
+  return head + stats + hint + list;
+}
+
+async function loadKabinet() {
+  try {
+    const d = await api('/api/me');
+    $('#kabinet-body').innerHTML = kabinetHTML(d);
+  } catch (_) {
+    $('#kabinet-body').innerHTML = '<div class="empty"><b>Ma‘lumot yuklanmadi</b>Birozdan keyin qayta urinib ko‘ring.</div>';
+  }
+}
+
 /* ---------- Yo'naltirish ---------- */
 function show(tab) {
   if (!TABS.includes(tab)) tab = 'jang';
@@ -632,9 +553,7 @@ function show(tab) {
   });
   $('#pill').textContent = PILLS[tab];
   if (tab === 'jang') renderJang(true);
-  if (tab === 'liga') { renderLigaTabs(); loadLiga(); }
-  if (tab === 'turnir') loadTurnir();
-  if (tab === 'profil') renderProfil();
+  if (tab === 'kabinet') loadKabinet();
   window.scrollTo(0, 0);
 }
 function route() {
@@ -655,7 +574,6 @@ async function refresh() {
     state.recent = data.recent;
     if (!state.categories.length) state.categories = data.categories;
     if (state.tab === 'jang') renderJang(false);
-    if (state.tab === 'liga') renderLigaTabs();
   } catch (_) { /* tarmoq xatosi, keyingi urinishda */ }
 }
 
@@ -668,18 +586,11 @@ function countVisit() {
 }
 
 (async function init() {
-  initTheme();
-  document.querySelectorAll('[data-theme-toggle]').forEach((btn) => {
-    btn.addEventListener('click', () => applyTheme(document.body.dataset.theme === 'day' ? 'night' : 'day'));
-  });
   try { state.config = await api('/api/config'); } catch (_) { state.config = {}; }
   countVisit();
   await refresh();
   route();
   setInterval(tickTimer, 1000);
   setInterval(refresh, 8000);
-  setInterval(() => {
-    if (state.tab === 'liga') loadLiga();
-    if (state.tab === 'turnir') loadTurnir();
-  }, 30000);
+  setInterval(() => { if (state.tab === 'kabinet') loadKabinet(); }, 30000);
 })();
