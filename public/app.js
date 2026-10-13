@@ -3,6 +3,27 @@
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+const THEME_KEY = 'instaduel-theme';
+function applyTheme(theme) {
+  const next = theme === 'day' ? 'day' : 'night';
+  document.body.dataset.theme = next;
+  localStorage.setItem(THEME_KEY, next);
+  document.querySelectorAll('[data-theme-toggle]').forEach((btn) => {
+    btn.textContent = next === 'day' ? '🌙' : '☀️';
+    btn.setAttribute('aria-label', next === 'day' ? 'Tun rejimi' : 'Kun rejimi');
+    btn.setAttribute('title', next === 'day' ? 'Tun rejimiga o‘tish' : 'Kun rejimiga o‘tish');
+  });
+}
+function initTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    const preferred = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+    applyTheme(saved || preferred);
+  } catch (_) {
+    applyTheme('night');
+  }
+}
+
 const TABS = ['jang', 'liga', 'turnir', 'profil'];
 const PILLS = { jang: 'Kun jangi, 1 va 1', liga: 'Hafta yakuni: yakshanba', turnir: '', profil: 'Anonim' };
 
@@ -101,12 +122,12 @@ function duelHTML(b) {
     const text = picked ? `Tanlandi: ${key.toUpperCase()}` : `${key.toUpperCase()} uchun ovoz`;
     return `<button type="button" class="v${key}${picked ? ' picked' : ''}" data-vote="${key}" data-id="${b.id}"${voted || blocked ? ' disabled' : ''}>${text}</button>`;
   };
-  const bothBtn = `<button type="button" class="vboth${b.myVote === 'both' ? ' picked' : ''}" data-vote="both" data-id="${b.id}"${voted || blocked ? ' disabled' : ''}>${b.myVote === 'both' ? 'Ikkalasiga ham muxlisman: tanlandi' : 'Ikkalasiga ham muxlisman'}</button>`;
+  const bothBtn = `<button type="button" class="vboth${b.myVote === 'both' ? ' picked' : ''}" data-vote="both" data-id="${b.id}"${voted || blocked ? ' disabled' : ''}>${b.myVote === 'both' ? 'Ikkalasini ham tanladingiz' : 'Ikkalasini ham qo‘llab-quvvatlash'}</button>`;
   const tgLink = state.config.botUsername ? ` <a href="https://t.me/${esc(state.config.botUsername)}" target="_blank" rel="noopener noreferrer" style="text-decoration:underline">Botni ochish</a>` : '';
   let noteHTML;
   if (blocked) noteHTML = `<div class="note err" role="status">Ovoz berish uchun InstaDuel ni Telegram ichida oching.${tgLink}</div>`;
   else if (msg && msg.err) noteHTML = `<div class="note err" role="status">${esc(msg.text)}</div>`;
-  else if (b.myVote === 'both') noteHTML = `<div class="note ok" role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>Ikkala blogerni ham qo‘llab-quvvatladingiz. Rahmat!</div>`;
+  else if (b.myVote === 'both') noteHTML = `<div class="note ok" role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>Ikkala blogerni ham qo‘llab-quvvatladi[...]
   else if (voted) noteHTML = `<div class="note ok" role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>Ovozingiz qabul qilindi. Rahmat!</div>`;
   else noteHTML = `<div class="note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 4L3 11l6 2 2 6 3-4 5 3z"/></svg>Har bir duelda bitta ovoz beriladi. Tanlovni o‘zgartirib bo‘lmaydi.</div>`;
 
@@ -647,6 +668,10 @@ function countVisit() {
 }
 
 (async function init() {
+  initTheme();
+  document.querySelectorAll('[data-theme-toggle]').forEach((btn) => {
+    btn.addEventListener('click', () => applyTheme(document.body.dataset.theme === 'day' ? 'night' : 'day'));
+  });
   try { state.config = await api('/api/config'); } catch (_) { state.config = {}; }
   countVisit();
   await refresh();

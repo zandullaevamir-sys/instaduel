@@ -1,6 +1,27 @@
 'use strict';
 const $ = (s) => document.querySelector(s);
 
+const THEME_KEY = 'instaduel-theme';
+function applyTheme(theme) {
+  const next = theme === 'day' ? 'day' : 'night';
+  document.body.dataset.theme = next;
+  localStorage.setItem(THEME_KEY, next);
+  document.querySelectorAll('[data-theme-toggle]').forEach((btn) => {
+    btn.textContent = next === 'day' ? '🌙' : '☀️';
+    btn.setAttribute('aria-label', next === 'day' ? 'Tun rejimi' : 'Kun rejimi');
+    btn.setAttribute('title', next === 'day' ? 'Tun rejimiga o‘tish' : 'Kun rejimiga o‘tish');
+  });
+}
+function initTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    const preferred = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+    applyTheme(saved || preferred);
+  } catch (_) {
+    applyTheme('night');
+  }
+}
+
 function timeLeft(endsAt) {
   const ms = Date.parse(endsAt) - Date.now();
   if (!(ms > 0)) return '00:00:00';
@@ -11,6 +32,11 @@ function timeLeft(endsAt) {
 }
 
 (async function () {
+  initTheme();
+  document.querySelectorAll('[data-theme-toggle]').forEach((btn) => {
+    btn.addEventListener('click', () => applyTheme(document.body.dataset.theme === 'day' ? 'night' : 'day'));
+  });
+
   // Hamkorlik tugmasi faqat CONTACT_URL berilgan bo'lsa ko'rinadi
   try {
     const cfg = await (await fetch('/api/config')).json();
